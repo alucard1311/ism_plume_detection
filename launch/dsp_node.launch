@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<launch>
+
+<node name="pingdsp_sonar_data_node" pkg="avl_devices" type="pingdsp_sonar_data_node"
+        clear_params="true" required="true" output="screen">
+        <rosparam command="load" file="/home/cmar/avl/src/avl_devices/src/node/pingdsp_sonar_data_node.config"/>
+    </node>
+    
+<node name="pingdsp_sonar_node" pkg="avl_devices" type="pingdsp_sonar_node" 
+        clear_params="true" required="true" output="screen">
+        <rosparam command="load" file="/home/cmar/avl/src/avl_devices/src/node/pingdsp_sonar_node.config"/>
+    </node>
+</launch>
