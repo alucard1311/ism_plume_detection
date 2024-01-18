@@ -23,11 +23,12 @@ ros::Publisher pcl_pub;
 int ism_model(){
     std::vector<std::string> training_files = {
         "/home/cmar/CMAR/pcd_traning_files/traning_batch_1649760492.pcd",
-        // "/home/cmar/CMAR/pcd_traning_files/traning_batch_424238335.pcd",
-        // "/home/cmar/CMAR/pcd_traning_files/traning_batch_1681692777.pcd",
-        // "/home/cmar/CMAR/pcd_traning_files/traning_batch_596516649.pcd",
-        // "/home/cmar/CMAR/pcd_traning_files/traning_batch_846930886.pcd",
-        // Add more training file paths as needed
+        "/home/cmar/CMAR/pcd_traning_files/traning_batch_424238335.pcd",
+        "/home/cmar/CMAR/pcd_traning_files/traning_batch_1681692777.pcd",
+        "/home/cmar/CMAR/pcd_traning_files/traning_batch_596516649.pcd",
+        "/home/cmar/CMAR/pcd_traning_files/traning_batch_846930886.pcd",
+        
+        //Add more training file paths as needed
     };
 
     std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> training_clouds;
@@ -75,22 +76,30 @@ int ism_model(){
     ism.setSamplingSize(2.0f);
 
     pcl::ism::ImplicitShapeModelEstimation<153, pcl::PointXYZ, pcl::Normal>::ISMModelPtr model(new pcl::features::ISMModel);
+    
     ism.trainISM(model);
 
     std::string file("trained_ism_model_2.txt");
+    ROS_INFO("Saving the trained mdoel");
     model->saveModelToFile(file);
+    
+    std::string pcd_file ("-============trained_ism_model_2.txt=============");
+    model->loadModelFromfile(pcd_file);
+    ROS_INFO("Model Loaded");
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
     std::string testing_file("/home/cmar/CMAR/pcd_traning_files/traning_batch_846930886.pcd");
-
+    
     unsigned int testing_class = 1;
     
     pcl::PointCloud<pcl::PointXYZ>::Ptr testing_cloud(new pcl::PointCloud<pcl::PointXYZ>());
     if (pcl::io::loadPCDFile<pcl::PointXYZ>(testing_file, *testing_cloud) == -1)
     {
+        //ROS_INFO("Openning the file");
         PCL_ERROR("Couldn't read file %s\n", testing_file.c_str());
         return -1; // Skip this file and continue with the next one
     }
+    ROS_INFO("Testing PCD Loaded");
 
     
     pcl::PointCloud<pcl::Normal>::Ptr testing_normals(new pcl::PointCloud<pcl::Normal>);
@@ -99,16 +108,13 @@ int ism_model(){
     normal_estimator.setRadiusSearch(10);
     normal_estimator.compute(*testing_normals);   
     
-
+    ROS_INFO("Classifying the Input Point Cloud");
     pcl::features::ISMVoteList<pcl::PointXYZ>::Ptr vote_list = ism.findObjects(
         model,
         testing_cloud,
         testing_normals,
         testing_class);
-
-
-    ROS_INFO("I am here");
-
+    ROS_INFO("Completed Classification");
     double radius = model->sigmas_[testing_class];
     double sigma = model->sigmas_[testing_class];
     std::vector<pcl::ISMPeak, Eigen::aligned_allocator<pcl::ISMPeak>> strongest_peaks;
@@ -146,22 +152,29 @@ int ism_model(){
 
     sensor_msgs::PointCloud2 colored_cloud_msg;
     pcl::toROSMsg(*colored_cloud, colored_cloud_msg);
+    pcl::io::savePCDFileASCII("classification_output.pcd", *colored_cloud);
+    ROS_INFO("Saved Point PointCloud");
+    // ros::Time::init();
+    colored_cloud_msg.header.stamp = ros::Time::now();
     colored_cloud_msg.header.frame_id = "/base_link";
-    colored_cloud_msg.
     pcl_pub.publish(colored_cloud_msg);
+
 
 
 }
 
 int main(int argc, char **argv)
 {
+    
     ros::init(argc, argv, "ism_node");
     ros::NodeHandle nh;
+    ros::Rate rate(10);
     pcl_pub = nh.advertise<sensor_msgs::PointCloud2>("/avl/ism_pointclouds", 1000);
     ism_model();
 
     // pcl_postproc_pub.publish(colored_cloud);
     ros::spin();
+    rate.sleep();
     
     return 0;
 }
