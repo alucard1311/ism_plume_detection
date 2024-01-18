@@ -47,7 +47,7 @@ int ism_model(){
         // Compute Normals
         pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> normal_estimator;
         normal_estimator.setInputCloud(cloud);
-        normal_estimator.setRadiusSearch(0.03);
+        normal_estimator.setRadiusSearch(10);
         pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
         normal_estimator.compute(*cloud_normals);
 
@@ -65,7 +65,7 @@ int ism_model(){
     }
 
     pcl::FPFHEstimation<pcl::PointXYZ, pcl::Normal, pcl::Histogram<153>>::Ptr fpfh(new pcl::FPFHEstimation<pcl::PointXYZ, pcl::Normal, pcl::Histogram<153>>);
-    fpfh->setRadiusSearch(30.0);
+    fpfh->setRadiusSearch(10.0);
     pcl::Feature<pcl::PointXYZ, pcl::Histogram<153>>::Ptr feature_estimator(fpfh);
 
     pcl::ism::ImplicitShapeModelEstimation<153, pcl::PointXYZ, pcl::Normal> ism;
@@ -77,18 +77,19 @@ int ism_model(){
 
     pcl::ism::ImplicitShapeModelEstimation<153, pcl::PointXYZ, pcl::Normal>::ISMModelPtr model(new pcl::features::ISMModel);
     
-    ism.trainISM(model);
+    // ism.trainISM(model);
 
-    std::string file("trained_ism_model_2.txt");
-    ROS_INFO("Saving the trained mdoel");
-    model->saveModelToFile(file);
+    // std::string file("trained_ism_model_2.txt");
+    // ROS_INFO("Saving the trained mdoel");
+    // model->saveModelToFile(file);
     
-    std::string pcd_file ("-============trained_ism_model_2.txt=============");
+    std::string pcd_file ("trained_ism_model_2.txt");
     model->loadModelFromfile(pcd_file);
     ROS_INFO("Model Loaded");
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
-    std::string testing_file("/home/cmar/CMAR/pcd_traning_files/traning_batch_846930886.pcd");
+    // std::string testing_file("/home/cmar/CMAR/pcd_traning_files/traning_batch_846930886.pcd");
+    std::string testing_file("/home/cmar/avl/src/plume_detection/src/point_cloud_2.pcd");
     
     unsigned int testing_class = 1;
     
@@ -173,8 +174,8 @@ int main(int argc, char **argv)
     ism_model();
 
     // pcl_postproc_pub.publish(colored_cloud);
-    ros::spin();
-    rate.sleep();
+    ros::spinOnce();
+    //rate.sleep();
     
     return 0;
 }
