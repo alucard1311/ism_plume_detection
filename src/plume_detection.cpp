@@ -27,6 +27,10 @@ int ism_model(){
         "/home/cmar/CMAR/pcd_traning_files/traning_batch_1681692777.pcd",
         "/home/cmar/CMAR/pcd_traning_files/traning_batch_596516649.pcd",
         "/home/cmar/CMAR/pcd_traning_files/traning_batch_846930886.pcd",
+        "/home/cmar/CMAR/pcd_traning_files/traning_batch_719885386.pcd",
+         "/home/cmar/CMAR/pcd_traning_files/traning_batch_1714636915.pcd",
+         "/home/cmar/CMAR/pcd_traning_files/traning_batch_1804289383.pcd",
+          "/home/cmar/CMAR/pcd_traning_files/traning_batch_1957747793.pcd",
         
         //Add more training file paths as needed
     };
@@ -77,19 +81,19 @@ int ism_model(){
 
     pcl::ism::ImplicitShapeModelEstimation<153, pcl::PointXYZ, pcl::Normal>::ISMModelPtr model(new pcl::features::ISMModel);
     
-    // ism.trainISM(model);
+    ism.trainISM(model);
 
-    // std::string file("trained_ism_model_2.txt");
+    // std::string file("trained_ism_model_all.txt");
     // ROS_INFO("Saving the trained mdoel");
     // model->saveModelToFile(file);
     
-    std::string pcd_file ("trained_ism_model_2.txt");
+    std::string pcd_file ("trained_ism_model_all.txt");
     model->loadModelFromfile(pcd_file);
     ROS_INFO("Model Loaded");
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
-    // std::string testing_file("/home/cmar/CMAR/pcd_traning_files/traning_batch_846930886.pcd");
-    std::string testing_file("/home/cmar/avl/src/plume_detection/src/point_cloud_2.pcd");
+    //std::string testing_file("/home/cmar/CMAR/pcd_traning_files/traning_batch_596516649.pcd");
+    std::string testing_file("/home/cmar/avl/src/plume_detection/src/point_cloud_3.pcd");
     
     unsigned int testing_class = 1;
     
