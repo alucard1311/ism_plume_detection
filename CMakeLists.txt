@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   pcl_conversions pcl_ros
 )
+find_package(PCL COMPONENTS common REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -125,8 +126,12 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
 # include
+  ${PCL_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
+
+
+add_definitions(${PCL_DEFINITIONS})
 
 include_directories(${catkin_INCLUDE_DIRS})
 include_directories(${PCL_INCLUDE_DIRS})
@@ -137,11 +142,10 @@ add_definitions(${PCL_DEFINITIONS})
 
 
 add_executable(plume_testing_node src/plume_testing.cpp)
-target_link_libraries(plume_testing_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+target_link_libraries(plume_testing_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} pcl_visualization)
 
 add_executable(plume_detection_node src/plume_detection.cpp)
-target_link_libraries(plume_detection_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
-
+target_link_libraries(plume_detection_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} pcl_visualization)
 
 
 # add_executable(pcd_generator_node src/pcd_generator.cpp)
