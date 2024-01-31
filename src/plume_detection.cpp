@@ -26,7 +26,7 @@ pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisuali
 int ism_model()
 {
     std::vector<std::string> training_files = {
-        "/home/cmar/avl/src/plume_detection/src/point_cloud_3.pcd",
+        "/home/cmar/avl/src/plume_detection/src/point_cloud_4.pcd",
         //"/home/cmar/CMAR/pcd_traning_files/traning_batch_424238335.pcd",
         // "/home/cmar/CMAR/pcd_traning_files/traning_batch_1681692777.pcd",
         // "/home/cmar/CMAR/pcd_traning_files/traning_batch_596516649.pcd",
