@@ -97,7 +97,7 @@ public:
         //         viewer->addArrow(arrow_start, arrow_end, 0.0, 1.0, 0.0, std::to_string(i));
         //     }
         // }
-
+        viewer->spinOnce(100);
         counter++;
 
         // pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
