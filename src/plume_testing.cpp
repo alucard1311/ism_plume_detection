@@ -20,7 +20,7 @@
 #include <pcl/features/fpfh_omp.h>
 #include <pcl/features/shot_omp.h>
 #include <pcl/features/pfh.h>
-
+#include <mutex>
 #include <thread>
 #include <chrono>
 
@@ -44,16 +44,16 @@ public:
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::fromROSMsg(*msg, *cloud);
 
-        pcl::VoxelGrid<pcl::PointXYZ> voxel_grid;
-        voxel_grid.setInputCloud(cloud);
-        voxel_grid.setLeafSize(0.5, 0.5, 0.01); // Adjust leaf size as needed
-        voxel_grid.filter(*cloud);
+        // pcl::VoxelGrid<pcl::PointXYZ> voxel_grid;
+        // voxel_grid.setInputCloud(cloud);
+        // voxel_grid.setLeafSize(0.4, 0.4, 0.01); // Adjust leaf size as needed
+        // voxel_grid.filter(*cloud);
 
-        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-        sor.setInputCloud(cloud);
-        sor.setMeanK(50);            // Adjust as needed
-        sor.setStddevMulThresh(1.0); // Adjust as needed
-        sor.filter(*cloud);
+        // pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+        // sor.setInputCloud(cloud);
+        // sor.setMeanK(50);            // Adjust as needed
+        // sor.setStddevMulThresh(1.0); // Adjust as needed
+        // sor.filter(*cloud);
 
         // accumulated_cloud += cloud;
         //  viewer.showCloud(accumulated_cloud.makeShared());
@@ -64,13 +64,13 @@ public:
         normal_estimator.setRadiusSearch(10);
         normal_estimator.compute(*cloud_normals);
         ROS_INFO("Done Computing Normals Data");
-        // std::string cloud_name = "cloud" + std::to_string(counter);
-        // viewer->addPointCloud(cloud, cloud_name);
-        // std::string normals_name = "normals" + std::to_string(counter);
+        std::string cloud_name = "cloud" + std::to_string(counter);
+        viewer->addPointCloud(cloud, cloud_name);
+        std::string normals_name = "normals" + std::to_string(counter);
 
-        // viewer->addPointCloudNormals<pcl::PointXYZ, pcl::Normal>(cloud, cloud_normals, 10, 0.02, normals_name);
-        // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_LINE_WIDTH, 30, normals_name);
-        // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 255.0, 0.0, 0.0, normals_name);
+        viewer->addPointCloudNormals<pcl::PointXYZ, pcl::Normal>(cloud, cloud_normals, 10, 0.02, normals_name);
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_LINE_WIDTH, 30, normals_name);
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 255.0, 0.0, 0.0, normals_name);
         // fpfh estimation
         // pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_features(new pcl::PointCloud<pcl::FPFHSignature33>);
         // pcl::FPFHEstimationOMP<pcl::PointXYZ, pcl::Normal, pcl::FPFHSignature33> fpfh_estimation;
@@ -79,27 +79,25 @@ public:
         // fpfh_estimation.setRadiusSearch(40);            // Adjust the radius based on your data
         // fpfh_estimation.compute(*fpfh_features);
 
-        pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_features(new pcl::PointCloud<pcl::PFHSignature125>);
-        pcl::PFHEstimation<pcl::PointXYZ, pcl::Normal, pcl::PFHSignature125> pfh_estimation;
-        pfh_estimation.setInputCloud(cloud);
-        pfh_estimation.setInputNormals(cloud_normals);
-        pfh_estimation.setRadiusSearch(20); // Adjust as needed
-        pfh_estimation.compute(*pfh_features);
+        //std::thread pfh_thread(&PcdConverter::computePFH, this, cloud, cloud_normals);
+        //pfh_thread.join();
 
         ROS_INFO("Im at the end");
         // pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> color_handler(cloud, 255, 0, 0);
         // viewer->addPointCloud<pcl::PointXYZ>(cloud, color_handler, "cloud");
 
         // pcl::PointXYZ position(0, 0, 0); // Just for visualization
-        // for (size_t i = 0; i < pfh_features->size(); ++i)
         // {
-        //     pcl::PointXYZ arrow_start(position);
-        //     pcl::PointXYZ arrow_end(position.x + 0.1, position.y + 0.01, position.z + 0.01);
+        //     std::lock_guard<std::mutex> lock(pfh_mutex);
+        //     for (size_t i = 0; i < pfh_features_->size(); ++i)
+        //     {
+        //         pcl::PointXYZ arrow_start(position);
+        //         pcl::PointXYZ arrow_end(position.x + 0.1, position.y + 0.01, position.z + 0.01);
 
-        //     viewer->addArrow(arrow_start, arrow_end, 0.0, 1.0, 0.0, std::to_string(i));
+        //         viewer->addArrow(arrow_start, arrow_end, 0.0, 1.0, 0.0, std::to_string(i));
+        //     }
         // }
 
-        viewer->spinOnce(100);
         counter++;
 
         // pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -119,8 +117,6 @@ public:
         // std::string cloud_name = "fpfh_colored_cloud" + std::to_string(counter);
         // viewer->addCoordinateSystem(5.0);
         // viewer->addPointCloud<pcl::PointXYZRGB>(colored_cloud, cloud_name);
-
-        counter++;
     }
     void save_to_pcd()
     {
@@ -160,6 +156,19 @@ public:
     }
 
 private:
+    void computePFH(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, const pcl::PointCloud<pcl::Normal>::Ptr &cloud_normals)
+    {
+        pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_features(new pcl::PointCloud<pcl::PFHSignature125>);
+
+        pcl::PFHEstimation<pcl::PointXYZ, pcl::Normal, pcl::PFHSignature125> pfh_estimation;
+        pfh_estimation.setInputCloud(cloud);
+        pfh_estimation.setInputNormals(cloud_normals);
+        pfh_estimation.setRadiusSearch(20); // Adjust as needed
+        pfh_estimation.compute(*pfh_features);
+
+        std::lock_guard<std::mutex> lock(pfh_mutex);
+        pfh_features_ = pfh_features;
+    }
     pcl::PointCloud<pcl::PointXYZI> accumulated_cloud;
     // pcl::visualization::CloudViewer viewer;
     ros::NodeHandle nh;
@@ -167,6 +176,8 @@ private:
     ros::ServiceServer save_service;
     ros::Timer viewer_timer;
     int counter;
+    pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_features_;
+    std::mutex pfh_mutex;
 };
 
 int main(int argc, char **argv)
