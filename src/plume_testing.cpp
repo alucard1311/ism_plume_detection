@@ -19,6 +19,7 @@
 #include <std_srvs/Trigger.h>
 #include <pcl/features/fpfh_omp.h>
 #include <pcl/features/shot_omp.h>
+#include <pcl/filters/uniform_sampling.h>
 #include <pcl/features/pfh.h>
 #include <mutex>
 #include <thread>
@@ -44,19 +45,10 @@ public:
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::fromROSMsg(*msg, *cloud);
 
-        // pcl::VoxelGrid<pcl::PointXYZ> voxel_grid;
-        // voxel_grid.setInputCloud(cloud);
-        // voxel_grid.setLeafSize(0.4, 0.4, 0.01); // Adjust leaf size as needed
-        // voxel_grid.filter(*cloud);
-
-        // pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-        // sor.setInputCloud(cloud);
-        // sor.setMeanK(50);            // Adjust as needed
-        // sor.setStddevMulThresh(1.0); // Adjust as needed
-        // sor.filter(*cloud);
-
-        // accumulated_cloud += cloud;
-        //  viewer.showCloud(accumulated_cloud.makeShared());
+        pcl::UniformSampling<pcl::PointXYZ> uniform_sampling;
+        uniform_sampling.setInputCloud(cloud);
+        uniform_sampling.setRadiusSearch(0.4);
+        uniform_sampling.filter(*cloud);
 
         // Surface Normal Estimation
         pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> normal_estimator;
@@ -71,52 +63,14 @@ public:
         viewer->addPointCloudNormals<pcl::PointXYZ, pcl::Normal>(cloud, cloud_normals, 10, 0.02, normals_name);
         viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_LINE_WIDTH, 30, normals_name);
         viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 255.0, 0.0, 0.0, normals_name);
-        // fpfh estimation
-        // pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_features(new pcl::PointCloud<pcl::FPFHSignature33>);
-        // pcl::FPFHEstimationOMP<pcl::PointXYZ, pcl::Normal, pcl::FPFHSignature33> fpfh_estimation;
-        // fpfh_estimation.setInputCloud(cloud);           // Assuming you're working with a single cloud
-        // fpfh_estimation.setInputNormals(cloud_normals); // Assuming you've computed normals
-        // fpfh_estimation.setRadiusSearch(40);            // Adjust the radius based on your data
-        // fpfh_estimation.compute(*fpfh_features);
+        
 
-        //std::thread pfh_thread(&PcdConverter::computePFH, this, cloud, cloud_normals);
-        //pfh_thread.join();
 
         ROS_INFO("Im at the end");
-        // pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> color_handler(cloud, 255, 0, 0);
-        // viewer->addPointCloud<pcl::PointXYZ>(cloud, color_handler, "cloud");
-
-        // pcl::PointXYZ position(0, 0, 0); // Just for visualization
-        // {
-        //     std::lock_guard<std::mutex> lock(pfh_mutex);
-        //     for (size_t i = 0; i < pfh_features_->size(); ++i)
-        //     {
-        //         pcl::PointXYZ arrow_start(position);
-        //         pcl::PointXYZ arrow_end(position.x + 0.1, position.y + 0.01, position.z + 0.01);
-
-        //         viewer->addArrow(arrow_start, arrow_end, 0.0, 1.0, 0.0, std::to_string(i));
-        //     }
-        // }
-        viewer->spinOnce(100);
+        
         counter++;
 
-        // pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-        // pcl::copyPointCloud(*cloud, *colored_cloud);
-
-        // for (size_t j = 0; j < colored_cloud->size(); ++j)
-        // {
-        //     pcl::PointXYZRGB &point = colored_cloud->at(j);
-        //     pcl::FPFHSignature33 &feature = fpfh_features->at(j);
-        //     uint8_t r = static_cast<uint8_t>(255 * feature.histogram[0]); // Adjust as needed
-        //     uint8_t g = static_cast<uint8_t>(255 * feature.histogram[1]); // Adjust as needed
-        //     uint8_t b = static_cast<uint8_t>(255 * feature.histogram[2]); // Adjust as needed
-        //     point.r = r;
-        //     point.g = g;
-        //     point.b = b;
-        // }
-        // std::string cloud_name = "fpfh_colored_cloud" + std::to_string(counter);
-        // viewer->addCoordinateSystem(5.0);
-        // viewer->addPointCloud<pcl::PointXYZRGB>(colored_cloud, cloud_name);
+        
     }
     void save_to_pcd()
     {
