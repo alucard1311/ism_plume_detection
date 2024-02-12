@@ -10,7 +10,7 @@
 #include <pcl/conversions.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/statistical_outlier_removal.h>
-
+#include <pcl/visualization/histogram_visualizer.h>
 #include <pcl/filters/voxel_grid.h>
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -26,34 +26,51 @@
 #include <chrono>
 
 pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Point Cloud with Normals"));
+pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
+pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> normal_estimator;
+pcl::PointCloud<pcl::PointXYZI> accumulated_cloud;
+pcl::UniformSampling<pcl::PointXYZ> uniform_sampling;
+pcl::VoxelGrid<pcl::PointXYZ> vg;
+pcl::visualization::PCLHistogramVisualizer visualizer;
+
+pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_features(new pcl::PointCloud<pcl::FPFHSignature33>);
+pcl::FPFHEstimationOMP<pcl::PointXYZ, pcl::Normal, pcl::FPFHSignature33> fpfh_estimation;
 
 class PcdConverter
 {
 public:
     PcdConverter() : counter(0)
     {
-        sub = nh.subscribe("/bsd_sonar/pcl_preproc_sonar", 1, &PcdConverter::pc_callback, this);
+        sub = nh.subscribe("/bsd_sonar/pcl_postproc_sonar", 1, &PcdConverter::pc_callback, this);
         save_service = nh.advertiseService("avl/save_point_cloud", &PcdConverter::saveServiceCallback, this);
         viewer_timer = nh.createTimer(ros::Duration(1), &PcdConverter::timerCB, this);
     }
     void pc_callback(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
 
-        ROS_INFO("Processing Data");
+        // ROS_INFO("Processing Data");
 
-        pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::fromROSMsg(*msg, *cloud);
 
-        pcl::UniformSampling<pcl::PointXYZ> uniform_sampling;
-        uniform_sampling.setInputCloud(cloud);
-        uniform_sampling.setRadiusSearch(0.4);
-        uniform_sampling.filter(*cloud);
+        // uniform_sampling.setInputCloud(cloud);
+        // uniform_sampling.setRadiusSearch(0.4);
+        // uniform_sampling.filter(*cloud);
+
+        // vg.setInputCloud(cloud);
+        // vg.setLeafSize(0.4, 0.4, 0.01f); // Adjust based on your requirements
+        // vg.filter(*cloud);
 
         // Surface Normal Estimation
-        pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> normal_estimator;
+
+        // Adaptive Radii
+        double radii;
+        radii =computeAdaptiveRadius(cloud,5);
+        ROS_INFO("Global adaptive radius: %f", radii);
+
+
         normal_estimator.setInputCloud(cloud);
-        normal_estimator.setRadiusSearch(10);
+        normal_estimator.setRadiusSearch(radii);
         normal_estimator.compute(*cloud_normals);
         ROS_INFO("Done Computing Normals Data");
         std::string cloud_name = "cloud" + std::to_string(counter);
@@ -63,15 +80,65 @@ public:
         viewer->addPointCloudNormals<pcl::PointXYZ, pcl::Normal>(cloud, cloud_normals, 10, 0.02, normals_name);
         viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_LINE_WIDTH, 30, normals_name);
         viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 255.0, 0.0, 0.0, normals_name);
-        
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+        //        ROS_INFO("Starting FPFH Estimation");
 
-        ROS_INFO("Im at the end");
-        
+        fpfh_estimation.setInputCloud(cloud);
+        fpfh_estimation.setInputNormals(cloud_normals);
+        fpfh_estimation.setRadiusSearch(4*radii);
+        ROS_INFO("I am starting to compute features");
+        fpfh_estimation.compute(*fpfh_features);
+        ROS_INFO("Done FPFH Estimation");
+
+        int index = 0; // For example, visualize the histogram for the first point
+
+        // Add the histogram data to the visualizer
+        std::string vis_name = "fpfh_histogram" + std::to_string(counter);
+
+        visualizer.addFeatureHistogram(*fpfh_features, 33, vis_name, 300, 400);
+
+        // Spin to keep the visualization window open
+
         counter++;
-
-        
     }
+    double computeAdaptiveRadius(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, int k)
+    {
+        pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+        kdtree.setInputCloud(cloud);
+
+        double total_average_distance = 0.0;
+        int valid_points = 0;
+
+        for (size_t i = 0; i < cloud->points.size(); ++i)
+        {
+            std::vector<int> indices(k);
+            std::vector<float> sqr_distances(k);
+            double average_distance = 0.0;
+
+            if (kdtree.nearestKSearch(cloud->points[i], k, indices, sqr_distances) > 0)
+            {
+                for (float sqr_distance : sqr_distances)
+                {
+                    average_distance += std::sqrt(sqr_distance);
+                }
+                average_distance /= static_cast<double>(k);
+                total_average_distance += average_distance;
+                valid_points++;
+            }
+        }
+
+        if (valid_points > 0)
+        {
+            double global_average = total_average_distance / valid_points;
+            return 2* global_average; // Double the global average distance to get the adaptive radius
+        }
+        else
+        {
+            return 0.0; // Return 0 or an appropriate default value if no valid points were found
+        }
+    }
+
     void save_to_pcd()
     {
         if (!accumulated_cloud.empty())
@@ -110,20 +177,6 @@ public:
     }
 
 private:
-    void computePFH(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, const pcl::PointCloud<pcl::Normal>::Ptr &cloud_normals)
-    {
-        pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_features(new pcl::PointCloud<pcl::PFHSignature125>);
-
-        pcl::PFHEstimation<pcl::PointXYZ, pcl::Normal, pcl::PFHSignature125> pfh_estimation;
-        pfh_estimation.setInputCloud(cloud);
-        pfh_estimation.setInputNormals(cloud_normals);
-        pfh_estimation.setRadiusSearch(20); // Adjust as needed
-        pfh_estimation.compute(*pfh_features);
-
-        std::lock_guard<std::mutex> lock(pfh_mutex);
-        pfh_features_ = pfh_features;
-    }
-    pcl::PointCloud<pcl::PointXYZI> accumulated_cloud;
     // pcl::visualization::CloudViewer viewer;
     ros::NodeHandle nh;
     ros::Subscriber sub;
