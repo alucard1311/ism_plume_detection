@@ -23,8 +23,15 @@
 #include <pcl/features/pfh.h>
 #include <pcl/point_types.h>
 #include <mutex>
+#include <fstream>
+#include <iostream>
 #include <thread>
 #include <chrono>
+#include <Eigen/Dense>
+#include <vector>
+#include "matplotlibcpp.h"
+#include <condition_variable>
+namespace plt = matplotlibcpp;
 
 pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Point Cloud with Normals"));
 pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
@@ -38,15 +45,34 @@ pcl::visualization::PCLHistogramVisualizer visualizer;
 pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_features(new pcl::PointCloud<pcl::FPFHSignature33>);
 pcl::FPFHEstimationOMP<pcl::PointXYZ, pcl::Normal, pcl::FPFHSignature33> fpfh_estimation;
 pcl::PointCloud<pcl::SHOT352>::Ptr shot_features{new pcl::PointCloud<pcl::SHOT352>};
+std::queue<Eigen::VectorXf> histogramQueue;
+std::mutex queueMutex;
+std::condition_variable queueCondVar;
 
 class PcdConverter
 {
 public:
-    PcdConverter() : counter(0)
+    PcdConverter() : counter(0), finished(false)
     {
         sub = nh.subscribe("/bsd_sonar/pcl_preproc_sonar", 1, &PcdConverter::pc_callback, this);
         save_service = nh.advertiseService("avl/save_point_cloud", &PcdConverter::saveServiceCallback, this);
         viewer_timer = nh.createTimer(ros::Duration(1), &PcdConverter::timerCB, this);
+        visThread = std::thread(&PcdConverter::visualizationThreadFunction, this);
+    }
+    ~PcdConverter()
+    {
+        // Signal the visualization thread to finish and wake it up
+        {
+            std::lock_guard<std::mutex> lock(queueMutex);
+            finished = true;
+        }
+        queueCondVar.notify_one();
+
+        // Wait for the visualization thread to finish
+        if (visThread.joinable())
+        {
+            visThread.join();
+        }
     }
     void pc_callback(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
@@ -65,15 +91,9 @@ public:
 
         // Surface Normal Estimation
 
-        // Adaptive Radii
-        double radii = 5;
-        // radii =computeAdaptiveRadius(cloud,5);
-
-        ROS_INFO("Global adaptive radius: %f", radii);
-
         normal_estimator.setInputCloud(cloud);
         normal_estimator.setNumberOfThreads(omp_get_max_threads());
-        normal_estimator.setKSearch(30);
+        normal_estimator.setKSearch(5);
         normal_estimator.compute(*cloud_normals);
         ROS_INFO("Done Computing Normals Data");
         std::string cloud_name = "cloud" + std::to_string(counter);
@@ -87,13 +107,10 @@ public:
 
         //        ROS_INFO("Starting FPFH Estimation");
 
-        fpfh_estimation.setInputCloud(cloud);
-        fpfh_estimation.setInputNormals(cloud_normals);
-
         // Correctly using the KdTree with the FPFH estimation object
         pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
         fpfh_estimation.setSearchMethod(tree);
-        fpfh_estimation.setRadiusSearch(40); // Make sure this radius is appropriate for your data
+        fpfh_estimation.setRadiusSearch(10); // Make sure this radius is appropriate for your data
         fpfh_estimation.setNumberOfThreads(omp_get_max_threads());
         ROS_INFO("I am starting to compute features");
 
@@ -118,104 +135,37 @@ public:
         fpfh_estimation.setInputNormals(filtered_normals);
         fpfh_estimation.compute(*fpfh_features);
         ROS_INFO("Done Computing Features");
-
-        int index = 0; // For example, visualize the histogram for the first point
-
-        // Add the histogram data to the visualizer
-        std::string vis_name = "fpfh_histogram" + std::to_string(counter);
-
-        visualizer.addFeatureHistogram(*fpfh_features, 33, vis_name, 300, 400);
-
-        // pcl::SHOTEstimationOMP<pcl::PointXYZ, pcl::Normal, pcl::SHOT352> shot_estimation; // Create a SHOTEstimation object
-        // shot_estimation.setInputCloud(cloud);
-        // shot_estimation.setInputNormals(cloud_normals);
-        // shot_estimation.setRadiusSearch(30); // Set the radius for SHOT estimation
-        // // Note: The search radius for SHOT can be different from FPFH
-
-        // shot_estimation.compute(*shot_features);
-
-        // int index = 0; // For example, visualize the histogram for the first point
-
-        // // Add the histogram data to the visualizer
-        // std::string vis_name = "fpfh_histogram" + std::to_string(counter);
-
-        // // Assuming you have a pcl::PointCloud<pcl::SHOT352>::Ptr named shot_features
-        // if (!shot_features->empty())
-        // {
-        //     // Access the descriptor values for the first point as an example
-        //     int index = 0; // Index of the point you're interested in
-
-        //     // Make sure the index is within the range of available points
-        //     if (index < shot_features->points.size())
-        //     {
-        //         // Create a vector to hold the descriptor values for the histogram
-        //         std::vector<float> descriptor_values;
-
-        //         for (int d = 0; d < pcl::SHOT352::descriptorSize(); ++d)
-        //         {
-        //             float value = shot_features->points[index].descriptor[d];
-        //             descriptor_values.push_back(value); // Add the value to the vector
-        //         }
-
-        //         // Create and configure the histogram visualizer
-        //         pcl::visualization::PCLHistogramVisualizer visualizer;
-        //         visualizer.setBackgroundColor(255, 255, 255); // Set a white background for better visibility
-
-        //         // Add the histogram data to the visualizer
-        //         visualizer.addFeatureHistogram<pcl::SHOT352>(descriptor_values, pcl::SHOT352::descriptorSize(), "SHOT Histogram", 300, 300);
-
-        //         // Display the histogram
-        //         visualizer.spin();
-        //     }
-        //     else
-        //     {
-        //         ROS_WARN("Specified point index is out of bounds.");
-        //     }
-        // }
-        // else
-        // {
-        //     ROS_WARN("SHOT features are empty. Cannot access descriptor values.");
-        // }
-
-        // Spin to keep the visualization window open
+        Eigen::VectorXf meanHistogram = computeMeanFPFHHistogram(fpfh_features);
+        ROS_INFO("Done Computing Mean Histograms");
+        // visualizeHistogram(meanHistogram);
+        addHistogramToQueue(meanHistogram);
 
         counter++;
     }
-    double computeAdaptiveRadius(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, int k)
+    Eigen::VectorXf computeMeanFPFHHistogram(const pcl::PointCloud<pcl::FPFHSignature33>::Ptr &fpfh_features)
     {
-        pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
-        kdtree.setInputCloud(cloud);
-
-        double total_average_distance = 0.0;
-        int valid_points = 0;
-
-        for (size_t i = 0; i < cloud->points.size(); ++i)
+        if (fpfh_features->empty())
         {
-            std::vector<int> indices(k);
-            std::vector<float> sqr_distances(k);
-            double average_distance = 0.0;
+            std::cerr << "FPFH features are empty." << std::endl;
+            return Eigen::VectorXf();
+        }
 
-            if (kdtree.nearestKSearch(cloud->points[i], k, indices, sqr_distances) > 0)
+        // Initialize a vector to hold the sum of all histograms
+        Eigen::VectorXf histogramSum = Eigen::VectorXf::Zero(pcl::FPFHSignature33::descriptorSize());
+
+        // Accumulate all FPFH histograms
+        for (const auto &feature : fpfh_features->points)
+        {
+            for (int i = 0; i < pcl::FPFHSignature33::descriptorSize(); ++i)
             {
-                for (float sqr_distance : sqr_distances)
-                {
-                    average_distance += std::sqrt(sqr_distance);
-                }
-                average_distance /= static_cast<double>(k);
-                total_average_distance += average_distance;
-                valid_points++;
+                histogramSum[i] += feature.histogram[i];
             }
         }
 
-        if (valid_points > 0)
-        {
-            double global_average = total_average_distance / valid_points;
-            return 2 * global_average; // Double the global average distance to get the adaptive radius
-        }
-        else
-        {
-            return 0.0; // Return 0 or an appropriate default value if no valid points were found
-        }
+        // Compute the mean histogram
+        Eigen::VectorXf meanHistogram = histogramSum / static_cast<float>(fpfh_features->size());
+
+        return meanHistogram;
     }
 
     void save_to_pcd()
@@ -243,8 +193,8 @@ public:
         {
             ros::spinOnce();
             viewer->spinOnce(100);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Update every 10 ms
-            ros::Duration(0.1).sleep();                                  // Sleep for a short duration to avoid high CPU usage
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            ros::Duration(0.1).sleep();
         }
     }
     void timerCB(const ros::TimerEvent &)
@@ -263,7 +213,49 @@ private:
     ros::Timer viewer_timer;
     int counter;
     pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_features_;
-    std::mutex pfh_mutex;
+    std::thread visThread;                      // Visualization thread
+    std::queue<Eigen::VectorXf> histogramQueue; // Queue for histograms to visualize
+    std::mutex queueMutex;                      // Mutex for thread-safe access to the queue
+    std::condition_variable queueCondVar;       // Condition variable for notifying the visualization thread
+    bool finished;
+
+    void addHistogramToQueue(const Eigen::VectorXf &histogram)
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        histogramQueue.push(histogram);
+        queueCondVar.notify_one();
+    }
+    void visualizationThreadFunction()
+    {
+        while (!finished)
+        {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            queueCondVar.wait(lock, [this]
+                              { return !histogramQueue.empty() || finished; });
+
+            if (finished)
+                break;
+
+            Eigen::VectorXf histogram = histogramQueue.front();
+            histogramQueue.pop();
+            lock.unlock();
+
+            // Plot the histogram using matplotlib-cpp
+            std::vector<double> bins(histogram.size()), values(histogram.size());
+            for (int i = 0; i < histogram.size(); ++i)
+            {
+                bins[i] = i;
+                values[i] = histogram[i];
+            }
+
+            plt::figure_size(800, 600);
+            plt::bar(bins, values);
+            plt::title("Mean FPFH Histogram");
+            plt::xlabel("Bin");
+            plt::ylabel("Frequency");
+            plt::show();
+        }
+    }
 };
 
 int main(int argc, char **argv)
