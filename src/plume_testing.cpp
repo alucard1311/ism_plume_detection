@@ -185,7 +185,7 @@ public:
             pcaCloud->points.push_back(point);
         }
         std::string pca_cloud_name = "pca_cloud" + std::to_string(counter);
-        viewer->addPointCloud<pcl::PointXYZRGB>(pcaCloud,pca_cloud_name);
+        //viewer->addPointCloud<pcl::PointXYZRGB>(pcaCloud,pca_cloud_name);
 
         counter++;
     }
