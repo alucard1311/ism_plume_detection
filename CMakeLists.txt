@@ -25,6 +25,13 @@ if(OPENMP_FOUND)
 endif()
 
 
+include_directories(
+  include
+  ${catkin_INCLUDE_DIRS}
+)
+find_package(PythonLibs 3.8 REQUIRED)  # Replace 2.7 with your Python version, e.g., 3.8
+include_directories(${PYTHON_INCLUDE_DIRS})
+
 
 
 ## System dependencies are found with CMake's conventions
@@ -152,7 +159,7 @@ add_definitions(${PCL_DEFINITIONS})
 
 
 add_executable(plume_testing_node src/plume_testing.cpp)
-target_link_libraries(plume_testing_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} pcl_visualization)
+target_link_libraries(plume_testing_node ${catkin_LIBRARIES} ${PCL_LIBRARIES}  ${PYTHON_LIBRARIES} pcl_visualization)
 
 add_executable(plume_detection_node src/plume_detection.cpp)
 target_link_libraries(plume_detection_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} pcl_visualization)
