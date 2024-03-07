@@ -15,6 +15,24 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   pcl_conversions pcl_ros
 )
+find_package(PCL COMPONENTS common REQUIRED)
+
+find_package(OpenMP)
+if(OPENMP_FOUND)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+endif()
+
+
+include_directories(
+  include
+  ${catkin_INCLUDE_DIRS}
+)
+find_package(PythonLibs 3.8 REQUIRED)  # Replace 2.7 with your Python version, e.g., 3.8
+include_directories(${PYTHON_INCLUDE_DIRS})
+
+
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -125,8 +143,12 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
 # include
+  ${PCL_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
+
+
+add_definitions(${PCL_DEFINITIONS})
 
 include_directories(${catkin_INCLUDE_DIRS})
 include_directories(${PCL_INCLUDE_DIRS})
@@ -137,11 +159,10 @@ add_definitions(${PCL_DEFINITIONS})
 
 
 add_executable(plume_testing_node src/plume_testing.cpp)
-target_link_libraries(plume_testing_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+target_link_libraries(plume_testing_node ${catkin_LIBRARIES} ${PCL_LIBRARIES}  ${PYTHON_LIBRARIES} pcl_visualization)
 
 add_executable(plume_detection_node src/plume_detection.cpp)
-target_link_libraries(plume_detection_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
-
+target_link_libraries(plume_detection_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} pcl_visualization)
 
 
 # add_executable(pcd_generator_node src/pcd_generator.cpp)
