@@ -104,45 +104,45 @@ public:
             viewer->addPointCloud<pcl::PointXYZ>(cloud_parts[i], pcl::visualization::PointCloudColorHandlerRandom<pcl::PointXYZ>(cloud_parts[i]), cloud_name + std::to_string(i));
         }
 
-        viewer->addCoordinateSystem(1.0);
-        viewer->initCameraParameters();
         counter++;
     }
 
+    void splitCloudIntoParts(const pcl::PointCloud<pcl::PointXYZ> &input_cloud, std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> &cloud_parts)
+    {
+        // Sort points based on Z-axis
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_sorted(new pcl::PointCloud<pcl::PointXYZ>);
+        *cloud_sorted = input_cloud;
+        std::sort(cloud_sorted->points.begin(), cloud_sorted->points.end(), [](const pcl::PointXYZ &a, const pcl::PointXYZ &b)
+                  { return a.z < b.z; });
 
-    void splitCloudIntoParts(const pcl::PointCloud<pcl::PointXYZ>& input_cloud, std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr>& cloud_parts)
-{
-    // Sort points based on Z-axis
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_sorted(new pcl::PointCloud<pcl::PointXYZ>);
-    *cloud_sorted = input_cloud;
-    std::sort(cloud_sorted->points.begin(), cloud_sorted->points.end(), [](const pcl::PointXYZ& a, const pcl::PointXYZ& b) {
-        return a.z < b.z;
-    });
+        // Calculate the number of points in each part
+        size_t part_size = cloud_sorted->size() / cloud_parts.size();
 
-    // Calculate the number of points in each part
-    size_t part_size = cloud_sorted->size() / cloud_parts.size();
-
-    // Extract points for each part
-    for (size_t i = 0; i < cloud_parts.size(); ++i) {
-        pcl::PointIndices::Ptr indices(new pcl::PointIndices);
-        for (size_t j = i * part_size; j < (i + 1) * part_size && j < cloud_sorted->size(); ++j) {
-            indices->indices.push_back(j);
-        }
-
-        // Last part gets any remaining points due to integer division
-        if (i == cloud_parts.size() - 1) {
-            for (size_t j = (i + 1) * part_size; j < cloud_sorted->size(); ++j) {
+        // Extract points for each part
+        for (size_t i = 0; i < cloud_parts.size(); ++i)
+        {
+            pcl::PointIndices::Ptr indices(new pcl::PointIndices);
+            for (size_t j = i * part_size; j < (i + 1) * part_size && j < cloud_sorted->size(); ++j)
+            {
                 indices->indices.push_back(j);
             }
-        }
 
-        pcl::ExtractIndices<pcl::PointXYZ> extract;
-        extract.setInputCloud(cloud_sorted);
-        extract.setIndices(indices);
-        extract.setNegative(false);
-        extract.filter(*cloud_parts[i]);
+            // Last part gets any remaining points due to integer division
+            if (i == cloud_parts.size() - 1)
+            {
+                for (size_t j = (i + 1) * part_size; j < cloud_sorted->size(); ++j)
+                {
+                    indices->indices.push_back(j);
+                }
+            }
+
+            pcl::ExtractIndices<pcl::PointXYZ> extract;
+            extract.setInputCloud(cloud_sorted);
+            extract.setIndices(indices);
+            extract.setNegative(false);
+            extract.filter(*cloud_parts[i]);
+        }
     }
-}
     Eigen::VectorXf computeMeanFPFHHistogram(const pcl::PointCloud<pcl::FPFHSignature33>::Ptr &fpfh_features)
     {
         if (fpfh_features->empty())
