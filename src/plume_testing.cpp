@@ -32,6 +32,8 @@
 #include <condition_variable>
 #include <pcl/common/pca.h>
 
+#include "plume_detection/Hist.h"
+
 pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Point Cloud with Normals"));
 pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
 pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -53,9 +55,10 @@ class PcdConverter
 public:
     PcdConverter() : counter(0), finished(false)
     {
-        sub = nh.subscribe("/bsd_sonar/pcl_postproc_sonar", 1, &PcdConverter::pc_callback, this);
+        sub = nh.subscribe("/bsd_sonar/pcl_preproc_sonar", 1, &PcdConverter::pc_callback, this);
         save_service = nh.advertiseService("avl/save_point_cloud", &PcdConverter::saveServiceCallback, this);
         viewer_timer = nh.createTimer(ros::Duration(1), &PcdConverter::timerCB, this);
+        histogram_pub = nh.advertise<plume_detection::Hist>("mean_histogram", 10);
     }
     ~PcdConverter()
     {
@@ -95,17 +98,16 @@ public:
         normal_estimator.compute(*cloud_normals);
         ROS_INFO("Done Computing Normals Data");
         std::string cloud_name = "cloud" + std::to_string(counter);
-        //viewer->addPointCloud(cloud, cloud_name);
+        viewer->addPointCloud(cloud, cloud_name);
         std::string normals_name = "normals" + std::to_string(counter);
 
-        // viewer->addPointCloudNormals<pcl::PointXYZ, pcl::Normal>(cloud, cloud_normals, 10, 0.02, normals_name);
-        // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_LINE_WIDTH, 30, normals_name);
-        // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 255.0, 0.0, 0.0, normals_name);
+        viewer->addPointCloudNormals<pcl::PointXYZ, pcl::Normal>(cloud, cloud_normals, 10, 0.02, normals_name);
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_LINE_WIDTH, 30, normals_name);
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 255.0, 0.0, 0.0, normals_name);
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         //        ROS_INFO("Starting FPFH Estimation");
 
-        // Correctly using the KdTree with the FPFH estimation object
         pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
         fpfh_estimation.setSearchMethod(tree);
         fpfh_estimation.setRadiusSearch(10); // Make sure this radius is appropriate for your data
@@ -133,59 +135,9 @@ public:
         fpfh_estimation.setInputNormals(filtered_normals);
         fpfh_estimation.compute(*fpfh_features);
         ROS_INFO("Done Computing Features");
-        // Eigen::VectorXf meanHistogram = computeMeanFPFHHistogram(fpfh_features);
-        // ROS_INFO("Done Computing Mean Histograms");
-        // // visualizeHistogram(meanHistogram);
-        // addHistogramToQueue(meanHistogram);
-        Eigen::MatrixXf fpfhMatrix(fpfh_features->points.size(), 33);
-        for (size_t i = 0; i < fpfh_features->points.size(); ++i)
-        {
-            for (int j = 0; j < 33; ++j)
-            {
-                fpfhMatrix(i, j) = fpfh_features->points[i].histogram[j];
-            }
-        }
-        pcl::PointCloud<pcl::PointXYZ>::Ptr fpfh_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-
-        // Fill the point cloud using the matrix data
-        for (int i = 0; i < fpfhMatrix.cols(); ++i)
-        {
-            pcl::PointXYZ point;
-            point.x = fpfhMatrix(0, i); // X coordinate
-            point.y = fpfhMatrix(1, i); // Y coordinate
-            point.z = fpfhMatrix(2, i); // Z coordinate
-            cloud->push_back(point);
-        }
-        pcl::PCA<pcl::PointXYZ> pca;
-        pca.setInputCloud(fpfh_cloud);
-        Eigen::VectorXf mean = fpfhMatrix.colwise().mean();
-        Eigen::MatrixXf centeredMatrix = fpfhMatrix.rowwise() - mean.transpose();
-
-        // Step 2: Compute the covariance matrix
-        Eigen::MatrixXf covarianceMatrix = centeredMatrix.transpose() * centeredMatrix / float(centeredMatrix.rows() - 1);
-
-        // Step 3: Compute the eigenvalues and eigenvectors of the covariance matrix
-        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigenSolver(covarianceMatrix);
-        Eigen::MatrixXf eigenVectors = eigenSolver.eigenvectors();
-
-        // Step 4: Project the centered data onto the PCA space
-        Eigen::MatrixXf transformedFeatures = centeredMatrix * eigenVectors;
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcaCloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-        for (size_t i = 0; i < transformedFeatures.rows(); ++i)
-        {
-            pcl::PointXYZRGB point;
-            point.x = transformedFeatures(i, 0); // First principal component
-            point.y = transformedFeatures(i, 1); // Second principal component
-            point.z = transformedFeatures(i, 2); // Third principal component
-            // Assign a color based on the first component for visualization
-            uint8_t intensity = static_cast<uint8_t>(point.x * 255);
-            uint32_t rgb = (static_cast<uint32_t>(intensity) << 16 |
-                            static_cast<uint32_t>(intensity) << 8 | static_cast<uint32_t>(intensity));
-            point.rgb = *reinterpret_cast<float *>(&rgb);
-            pcaCloud->points.push_back(point);
-        }
-        std::string pca_cloud_name = "pca_cloud" + std::to_string(counter);
-        //viewer->addPointCloud<pcl::PointXYZRGB>(pcaCloud,pca_cloud_name);
+        Eigen::VectorXf meanHistogram = computeMeanFPFHHistogram(fpfh_features);
+        ROS_INFO("Computed Mean Histograms, Publishing to Topic");
+        publishMeanHistogram(meanHistogram);
 
         counter++;
     }
@@ -208,11 +160,24 @@ public:
                 histogramSum[i] += feature.histogram[i];
             }
         }
-
-        // Compute the mean histogram
         Eigen::VectorXf meanHistogram = histogramSum / static_cast<float>(fpfh_features->size());
 
         return meanHistogram;
+    }
+    void publishMeanHistogram(const Eigen::VectorXf &meanHistogram)
+    {
+        plume_detection::Hist msg;
+
+        // Assuming the bins are simply 0 to meanHistogram.size() - 1
+        for (int i = 0; i < meanHistogram.size(); ++i)
+        {
+            msg.bins.push_back(i);
+            msg.values.push_back(meanHistogram[i]);
+        }
+
+        ROS_INFO("Publishing the Histogram");
+
+        histogram_pub.publish(msg);
     }
 
     void save_to_pcd()
@@ -265,6 +230,7 @@ private:
     std::mutex queueMutex;                      // Mutex for thread-safe access to the queue
     std::condition_variable queueCondVar;       // Condition variable for notifying the visualization thread
     bool finished;
+    ros::Publisher histogram_pub;
 };
 
 int main(int argc, char **argv)

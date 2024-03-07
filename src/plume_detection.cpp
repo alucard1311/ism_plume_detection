@@ -20,6 +20,10 @@
 #include <thread>
 #include <chrono>
 
+
+#include "plume_detection/Histogram.h"  // Replace `your_package_name` with the name of your package
+
+
 ros::Publisher pcl_pub;
 pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Point Cloud with Normals"));
 
