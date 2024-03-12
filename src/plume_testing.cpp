@@ -31,6 +31,7 @@
 #include <vector>
 #include <condition_variable>
 #include <pcl/common/pca.h>
+#include <visualization_msgs/Marker.h>
 
 #include <pcl/filters/extract_indices.h>
 #include <pcl/common/common.h>
@@ -57,7 +58,10 @@ public:
     PcdConverter() : counter(0), finished(false)
     {
         sub = nh.subscribe("/bsd_sonar/pcl_postproc_sonar", 1, &PcdConverter::pc_callback, this);
-        save_service = nh.advertiseService("avl/save_point_cloud", &PcdConverter::saveServiceCallback, this);
+        data_sub = nh.subscribe("/bsd_sonar/pcl_preproc_sonar", 1, &PcdConverter::sonar_callback, this);
+        principal_direction_pub = nh.advertise<visualization_msgs::Marker>("principal_direction_marker", 1);
+        vertical_axis_pub = nh.advertise<visualization_msgs::Marker>("vertical_axis_marker", 1);
+
         viewer_timer = nh.createTimer(ros::Duration(1), &PcdConverter::timerCB, this);
     }
     ~PcdConverter()
@@ -75,6 +79,29 @@ public:
             visThread.join();
         }
     }
+    void sonar_callback(const sensor_msgs::PointCloud2ConstPtr &msg)
+    {
+
+        // ROS_INFO("Processing Data");
+
+        pcl::fromROSMsg(*msg, *cloud);
+
+        // uniform_sampling.setInputCloud(cloud);
+        // uniform_sampling.setRadiusSearch(0.4);
+        // uniform_sampling.filter(*cloud);
+
+        // vg.setInputCloud(cloud);
+        // vg.setLeafSize(0.4, 0.4, 0.01f); // Adjust based on your requirements
+        // vg.filter(*cloud);
+
+        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(cloud, 255, 255, 255);
+        std::string cloud_name = "pre_cloud_" + std::to_string(counter);
+
+        viewer->addPointCloud<pcl::PointXYZ>(cloud, single_color, cloud_name);
+        ROS_INFO("adding preproc sonar data");
+
+        counter++;
+    }
     void pc_callback(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
 
@@ -82,118 +109,106 @@ public:
 
         pcl::fromROSMsg(*msg, *cloud);
 
-        uniform_sampling.setInputCloud(cloud);
-        uniform_sampling.setRadiusSearch(0.4);
-        uniform_sampling.filter(*cloud);
+        // uniform_sampling.setInputCloud(cloud);
+        // uniform_sampling.setRadiusSearch(0.4);
+        // uniform_sampling.filter(*cloud);
 
-        vg.setInputCloud(cloud);
-        vg.setLeafSize(0.4, 0.4, 0.01f); // Adjust based on your requirements
-        vg.filter(*cloud);
+        // vg.setInputCloud(cloud);
+        // vg.setLeafSize(0.4, 0.4, 0.01f); // Adjust based on your requirements
+        // vg.filter(*cloud);
 
-        std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> cloud_parts(4);
-        for (int i = 0; i < 4; ++i)
-        {
-            cloud_parts[i] = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
-        }
-        splitCloudIntoParts(*cloud, cloud_parts);
-        std::string cloud_name = "cloud_" + std::to_string(counter);
+        pcl::PCA<pcl::PointXYZ> pca;
+        pca.setInputCloud(cloud);
 
-        // Visualize each part
-        for (int i = 0; i < cloud_parts.size(); ++i)
-        {
-            viewer->addPointCloud<pcl::PointXYZ>(cloud_parts[i], pcl::visualization::PointCloudColorHandlerRandom<pcl::PointXYZ>(cloud_parts[i]), cloud_name + std::to_string(i));
-        }
+        ROS_INFO("Getting EigenVectors and Values");
+        Eigen::Vector3f eigenValues = pca.getEigenValues();
+        Eigen::Matrix3f eigenVectors = pca.getEigenVectors();
+
+        Eigen::Vector3f principalDirection = eigenVectors.col(0);
+
+        Eigen::Vector4f centroid;
+        pcl::compute3DCentroid(*cloud, centroid);
+
+        visualization_msgs::Marker principal_direction_marker;
+        principal_direction_marker.header.frame_id = "map"; // Set to your frame ID
+        principal_direction_marker.header.stamp = ros::Time::now();
+        principal_direction_marker.ns = "principal_direction";
+        principal_direction_marker.id = 0;
+        principal_direction_marker.type = visualization_msgs::Marker::ARROW;
+        principal_direction_marker.action = visualization_msgs::Marker::ADD;
+        principal_direction_marker.pose.position.x = centroid[0];
+        principal_direction_marker.pose.position.y = centroid[1];
+        principal_direction_marker.pose.position.z = centroid[2];
+        principal_direction_marker.scale.x = 0.5; // Shaft diameter
+        principal_direction_marker.scale.y = 0.1; // Head diameter
+        principal_direction_marker.scale.z = 0;   // Head length, not applicable for arrows
+        principal_direction_marker.color.a = 1.0; // Don't forget to set the alpha!
+        principal_direction_marker.color.r = 1.0f;
+        principal_direction_marker.color.g = 1.0f;
+        principal_direction_marker.color.b = 1.0f;
+        // Set the orientation of the marker to match the principal direction
+        Eigen::Vector3f start(centroid[0], centroid[1], centroid[2]); // Using the centroid as start
+        float arrowLength = 1.0;                                      // Set the desired arrow length
+        Eigen::Vector3f end = Eigen::Vector3f(centroid[0], centroid[1], centroid[2]) + principalDirection * arrowLength;
+
+        Eigen::Quaternionf quat = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitX(), (end - Eigen::Vector3f(centroid[0], centroid[1], centroid[2])));
+        principal_direction_marker.pose.orientation.x = quat.x();
+        principal_direction_marker.pose.orientation.y = quat.y();
+        principal_direction_marker.pose.orientation.z = quat.z();
+        principal_direction_marker.pose.orientation.w = quat.w();
+
+        // Publish the marker
+        principal_direction_pub.publish(principal_direction_marker);
+
+        visualization_msgs::Marker vertical_marker;
+        vertical_marker.header.frame_id = "map"; // Set to your frame ID, same as the principal direction marker
+        vertical_marker.header.stamp = ros::Time::now();
+        vertical_marker.ns = "vertical_axis";
+        vertical_marker.id = counter; // Unique ID for this marker in the namespace
+        vertical_marker.type = visualization_msgs::Marker::ARROW;
+        vertical_marker.action = visualization_msgs::Marker::ADD;
+        vertical_marker.pose.position.x = centroid[0];
+        vertical_marker.pose.position.y = centroid[1];
+        vertical_marker.pose.position.z = centroid[2];
+        vertical_marker.scale.x = 0.5; // Shaft diameter, smaller than the principal direction for distinction
+        vertical_marker.scale.y = 0.1; // Head diameter, smaller than the principal direction for distinction
+        vertical_marker.scale.z = 0;   // Head length, not applicable for arrows
+        vertical_marker.color.a = 1.0; // Don't forget to set the alpha!
+        vertical_marker.color.r = 0.0;
+        vertical_marker.color.g = 0.0;
+        vertical_marker.color.b = 1.0; // Blue color for the vertical axis
+
+        // The vertical axis is aligned with Z in most ROS coordinate systems
+        Eigen::Vector3f verticalEnd = Eigen::Vector3f(centroid[0], centroid[1], centroid[2]) + Eigen::Vector3f::UnitZ() * arrowLength; // Assuming Z is up
+        Eigen::Quaternionf vertical_quat = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitX(), (verticalEnd - Eigen::Vector3f(centroid[0], centroid[1], centroid[2])));
+        vertical_marker.pose.orientation.x = vertical_quat.x();
+        vertical_marker.pose.orientation.y = vertical_quat.y();
+        vertical_marker.pose.orientation.z = vertical_quat.z();
+        vertical_marker.pose.orientation.w = vertical_quat.w();
+
+        // Publish the vertical axis marker
+        vertical_axis_pub.publish(vertical_marker);
+
+        // pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(cloud, 0, 255, 0);
+        // std::string cloud_name = "cloud_" + std::to_string(counter);
+
+        // viewer->addPointCloud<pcl::PointXYZ>(cloud, single_color, cloud_name);
+        // ROS_INFO("adding Directional Vector");
+        // pcl::PointXYZ center(pca.getMean().x(), pca.getMean().y(), pca.getMean().z());
+        // std::string arrow_name = "arrow_" + std::to_string(counter);
+        // pcl::PointXYZ principalPoint(center.x + principalDirection.x(), center.y + principalDirection.y(), center.z + principalDirection.z());
+        // viewer->addArrow(principalPoint, center, 1.0, 0.0, 0.0, false, arrow_name);
 
         counter++;
     }
 
-    void splitCloudIntoParts(const pcl::PointCloud<pcl::PointXYZ> &input_cloud, std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> &cloud_parts)
-    {
-        // Sort points based on Z-axis
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_sorted(new pcl::PointCloud<pcl::PointXYZ>);
-        *cloud_sorted = input_cloud;
-        std::sort(cloud_sorted->points.begin(), cloud_sorted->points.end(), [](const pcl::PointXYZ &a, const pcl::PointXYZ &b)
-                  { return a.z < b.z; });
-
-        // Calculate the number of points in each part
-        size_t part_size = cloud_sorted->size() / cloud_parts.size();
-
-        // Extract points for each part
-        for (size_t i = 0; i < cloud_parts.size(); ++i)
-        {
-            pcl::PointIndices::Ptr indices(new pcl::PointIndices);
-            for (size_t j = i * part_size; j < (i + 1) * part_size && j < cloud_sorted->size(); ++j)
-            {
-                indices->indices.push_back(j);
-            }
-
-            // Last part gets any remaining points due to integer division
-            if (i == cloud_parts.size() - 1)
-            {
-                for (size_t j = (i + 1) * part_size; j < cloud_sorted->size(); ++j)
-                {
-                    indices->indices.push_back(j);
-                }
-            }
-
-            pcl::ExtractIndices<pcl::PointXYZ> extract;
-            extract.setInputCloud(cloud_sorted);
-            extract.setIndices(indices);
-            extract.setNegative(false);
-            extract.filter(*cloud_parts[i]);
-        }
-    }
-    Eigen::VectorXf computeMeanFPFHHistogram(const pcl::PointCloud<pcl::FPFHSignature33>::Ptr &fpfh_features)
-    {
-        if (fpfh_features->empty())
-        {
-            std::cerr << "FPFH features are empty." << std::endl;
-            return Eigen::VectorXf();
-        }
-
-        // Initialize a vector to hold the sum of all histograms
-        Eigen::VectorXf histogramSum = Eigen::VectorXf::Zero(pcl::FPFHSignature33::descriptorSize());
-
-        // Accumulate all FPFH histograms
-        for (const auto &feature : fpfh_features->points)
-        {
-            for (int i = 0; i < pcl::FPFHSignature33::descriptorSize(); ++i)
-            {
-                histogramSum[i] += feature.histogram[i];
-            }
-        }
-
-        // Compute the mean histogram
-        Eigen::VectorXf meanHistogram = histogramSum / static_cast<float>(fpfh_features->size());
-
-        return meanHistogram;
-    }
-
-    void save_to_pcd()
-    {
-        if (!accumulated_cloud.empty())
-        {
-            pcl::io::savePCDFileASCII("point_cloud.pcd", accumulated_cloud);
-            ROS_INFO("Saved Point PointCloud");
-        }
-        else
-        {
-            ROS_WARN("Accumulated PointCloud is empty. No data to save.");
-        }
-    }
-    bool saveServiceCallback(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res)
-    {
-        save_to_pcd();
-        res.success = true;
-        res.message = "Saving accumulated point cloud triggered.";
-        return true;
-    }
     void spin()
     {
         while (ros::ok() && !viewer->wasStopped())
         {
             ros::spinOnce();
             viewer->spinOnce(100);
+
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             ros::Duration(0.1).sleep();
         }
@@ -210,8 +225,12 @@ private:
     // pcl::visualization::CloudViewer viewer;
     ros::NodeHandle nh;
     ros::Subscriber sub;
+    ros::Subscriber data_sub;
     ros::ServiceServer save_service;
     ros::Timer viewer_timer;
+    ros::Publisher principal_direction_pub;
+    ros::Publisher vertical_axis_pub;
+
     int counter;
     pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_features_;
     std::thread visThread;                      // Visualization thread
@@ -223,9 +242,10 @@ private:
 
 int main(int argc, char **argv)
 {
+    viewer->addCoordinateSystem(1.0);
+    viewer->initCameraParameters();
     ros::init(argc, argv, "pcd_converter_node");
     PcdConverter subscriber;
     subscriber.spin();
-    subscriber.save_to_pcd();
     return 0;
 }

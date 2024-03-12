@@ -164,6 +164,10 @@ target_link_libraries(plume_testing_node ${catkin_LIBRARIES} ${PCL_LIBRARIES}  $
 add_executable(plume_detection_node src/plume_detection.cpp)
 target_link_libraries(plume_detection_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} pcl_visualization)
 
+# add_executable(principle_direction src/principle_direction.cpp)
+# target_link_libraries(principle_direction ${catkin_LIBRARIES} ${PCL_LIBRARIES}  ${PYTHON_LIBRARIES} pcl_visualization)
+
+
 
 # add_executable(pcd_generator_node src/pcd_generator.cpp)
 # target_link_libraries(pcd_generator_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
