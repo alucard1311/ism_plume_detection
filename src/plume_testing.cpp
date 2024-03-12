@@ -133,7 +133,7 @@ public:
         principal_direction_marker.header.frame_id = "map"; // Set to your frame ID
         principal_direction_marker.header.stamp = ros::Time::now();
         principal_direction_marker.ns = "principal_direction";
-        principal_direction_marker.id = 0;
+        principal_direction_marker.id = counter;
         principal_direction_marker.type = visualization_msgs::Marker::ARROW;
         principal_direction_marker.action = visualization_msgs::Marker::ADD;
         principal_direction_marker.pose.position.x = centroid[0];
@@ -148,7 +148,7 @@ public:
         principal_direction_marker.color.b = 1.0f;
         // Set the orientation of the marker to match the principal direction
         Eigen::Vector3f start(centroid[0], centroid[1], centroid[2]); // Using the centroid as start
-        float arrowLength = 1.0;                                      // Set the desired arrow length
+        float arrowLength = 130.0;                                      // Set the desired arrow length
         Eigen::Vector3f end = Eigen::Vector3f(centroid[0], centroid[1], centroid[2]) + principalDirection * arrowLength;
 
         Eigen::Quaternionf quat = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitX(), (end - Eigen::Vector3f(centroid[0], centroid[1], centroid[2])));
