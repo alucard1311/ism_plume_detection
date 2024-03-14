@@ -84,7 +84,7 @@ public:
 
         // ROS_INFO("Processing Data");
 
-        pcl::fromROSMsg(*msg, *cloud);
+        // pcl::fromROSMsg(*msg, *cloud);
 
         // uniform_sampling.setInputCloud(cloud);
         // uniform_sampling.setRadiusSearch(0.4);
@@ -94,113 +94,146 @@ public:
         // vg.setLeafSize(0.4, 0.4, 0.01f); // Adjust based on your requirements
         // vg.filter(*cloud);
 
-        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(cloud, 255, 255, 255);
-        std::string cloud_name = "pre_cloud_" + std::to_string(counter);
+        // pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(cloud, 255, 255, 255);
+        // std::string cloud_name = "pre_cloud_" + std::to_string(counter);
 
-        viewer->addPointCloud<pcl::PointXYZ>(cloud, single_color, cloud_name);
+        // viewer->addPointCloud<pcl::PointXYZ>(cloud, single_color, cloud_name);
         ROS_INFO("adding preproc sonar data");
 
         counter++;
     }
     void pc_callback(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
-
-        // ROS_INFO("Processing Data");
-
         pcl::fromROSMsg(*msg, *cloud);
-
-        // uniform_sampling.setInputCloud(cloud);
-        // uniform_sampling.setRadiusSearch(0.4);
-        // uniform_sampling.filter(*cloud);
-
-        // vg.setInputCloud(cloud);
-        // vg.setLeafSize(0.4, 0.4, 0.01f); // Adjust based on your requirements
-        // vg.filter(*cloud);
-
         pcl::PCA<pcl::PointXYZ> pca;
         pca.setInputCloud(cloud);
 
-        ROS_INFO("Getting EigenVectors and Values");
         Eigen::Vector3f eigenValues = pca.getEigenValues();
         Eigen::Matrix3f eigenVectors = pca.getEigenVectors();
+        Eigen::Vector3f principalDirection = eigenVectors.col(0).normalized();
 
-        Eigen::Vector3f principalDirection = eigenVectors.col(0);
+        Eigen::Vector3f verticalAxis(0, 0, 1);
+
+        // Calculate the angle between the vertical axis and the principal direction
+        float dotProduct = verticalAxis.dot(principalDirection);
+        float angleRadians = std::acos(dotProduct / (verticalAxis.norm() * principalDirection.norm()));
+        float angleDegrees = angleRadians * (180.0 / M_PI);
 
         Eigen::Vector4f centroid;
         pcl::compute3DCentroid(*cloud, centroid);
 
-        visualization_msgs::Marker principal_direction_marker;
-        principal_direction_marker.header.frame_id = "map"; // Set to your frame ID
-        principal_direction_marker.header.stamp = ros::Time::now();
-        principal_direction_marker.ns = "principal_direction";
-        principal_direction_marker.id = counter;
-        principal_direction_marker.type = visualization_msgs::Marker::ARROW;
-        principal_direction_marker.action = visualization_msgs::Marker::ADD;
-        principal_direction_marker.pose.position.x = centroid[0];
-        principal_direction_marker.pose.position.y = centroid[1];
-        principal_direction_marker.pose.position.z = centroid[2];
-        principal_direction_marker.scale.x = 0.5; // Shaft diameter
-        principal_direction_marker.scale.y = 0.1; // Head diameter
-        principal_direction_marker.scale.z = 0;   // Head length, not applicable for arrows
-        principal_direction_marker.color.a = 1.0; // Don't forget to set the alpha!
-        principal_direction_marker.color.r = 1.0f;
-        principal_direction_marker.color.g = 1.0f;
-        principal_direction_marker.color.b = 1.0f;
-        // Set the orientation of the marker to match the principal direction
-        Eigen::Vector3f start(centroid[0], centroid[1], centroid[2]); // Using the centroid as start
-        float arrowLength = 130.0;                                      // Set the desired arrow length
-        Eigen::Vector3f end = Eigen::Vector3f(centroid[0], centroid[1], centroid[2]) + principalDirection * arrowLength;
+        visualization_msgs::Marker vertical_axis_arrow;
+        vertical_axis_arrow.header.frame_id = "map";
+        vertical_axis_arrow.header.stamp = ros::Time::now();
+        vertical_axis_arrow.ns = "vertical_axis";
+        vertical_axis_arrow.id = counter; // Unique ID for this marker in the namespace
+        vertical_axis_arrow.type = visualization_msgs::Marker::ARROW;
+        vertical_axis_arrow.action = visualization_msgs::Marker::ADD;
+        vertical_axis_arrow.scale.x = 0.2;  // Shaft diameter
+        vertical_axis_arrow.scale.y = 0.4;  // Arrow width
+        vertical_axis_arrow.color.a = 1.0;  // Alpha for opacity
+        vertical_axis_arrow.color.r = 0.0f; // Violet color for the vertical axis
+        vertical_axis_arrow.color.g = 0.0f;
+        vertical_axis_arrow.color.b = 1.0f;
 
-        Eigen::Quaternionf quat = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitX(), (end - Eigen::Vector3f(centroid[0], centroid[1], centroid[2])));
-        principal_direction_marker.pose.orientation.x = quat.x();
-        principal_direction_marker.pose.orientation.y = quat.y();
-        principal_direction_marker.pose.orientation.z = quat.z();
-        principal_direction_marker.pose.orientation.w = quat.w();
+        geometry_msgs::Point v_start, v_end;
+        v_start.x = centroid[0];
+        v_start.y = centroid[1];
+        v_start.z = centroid[2];
+        v_end.x = centroid[0];
+        v_end.y = centroid[1];
+        v_end.z = centroid[2] + 7.0; // Adjust the length as needed
 
-        // Publish the marker
-        principal_direction_pub.publish(principal_direction_marker);
+        vertical_axis_arrow.points.push_back(v_start);
+        vertical_axis_arrow.points.push_back(v_end);
+        vertical_axis_pub.publish(vertical_axis_arrow);
 
-        visualization_msgs::Marker vertical_marker;
-        vertical_marker.header.frame_id = "map"; // Set to your frame ID, same as the principal direction marker
-        vertical_marker.header.stamp = ros::Time::now();
-        vertical_marker.ns = "vertical_axis";
-        vertical_marker.id = counter; // Unique ID for this marker in the namespace
-        vertical_marker.type = visualization_msgs::Marker::ARROW;
-        vertical_marker.action = visualization_msgs::Marker::ADD;
-        vertical_marker.pose.position.x = centroid[0];
-        vertical_marker.pose.position.y = centroid[1];
-        vertical_marker.pose.position.z = centroid[2];
-        vertical_marker.scale.x = 0.5; // Shaft diameter, smaller than the principal direction for distinction
-        vertical_marker.scale.y = 0.1; // Head diameter, smaller than the principal direction for distinction
-        vertical_marker.scale.z = 0;   // Head length, not applicable for arrows
-        vertical_marker.color.a = 1.0; // Don't forget to set the alpha!
-        vertical_marker.color.r = 0.0;
-        vertical_marker.color.g = 0.0;
-        vertical_marker.color.b = 1.0; // Blue color for the vertical axis
+        // Arrow for Principal Direction
+        visualization_msgs::Marker principal_direction_arrow;
+        principal_direction_arrow.header.frame_id = "map";
+        principal_direction_arrow.header.stamp = ros::Time::now();
+        principal_direction_arrow.ns = "principal_direction";
+        principal_direction_arrow.id = counter;
+        principal_direction_arrow.type = visualization_msgs::Marker::ARROW;
+        principal_direction_arrow.action = visualization_msgs::Marker::ADD;
+        principal_direction_arrow.scale.x = 0.2; // Shaft diameter
+        principal_direction_arrow.scale.y = 0.4; // Arrow width
+        principal_direction_arrow.color.a = 1.0;
+        principal_direction_arrow.color.r = 0.58f; // Violet color
+        principal_direction_arrow.color.g = 0.0f;
+        principal_direction_arrow.color.b = 0.83f;
 
-        // The vertical axis is aligned with Z in most ROS coordinate systems
-        Eigen::Vector3f verticalEnd = Eigen::Vector3f(centroid[0], centroid[1], centroid[2]) + Eigen::Vector3f::UnitZ() * arrowLength; // Assuming Z is up
-        Eigen::Quaternionf vertical_quat = Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f::UnitX(), (verticalEnd - Eigen::Vector3f(centroid[0], centroid[1], centroid[2])));
-        vertical_marker.pose.orientation.x = vertical_quat.x();
-        vertical_marker.pose.orientation.y = vertical_quat.y();
-        vertical_marker.pose.orientation.z = vertical_quat.z();
-        vertical_marker.pose.orientation.w = vertical_quat.w();
+        geometry_msgs::Point p_start, p_end;
+        p_start.x = centroid[0];
+        p_start.y = centroid[1];
+        p_start.z = centroid[2];
+        p_end.x = p_start.x + principalDirection[0] * 5.0;
+        p_end.y = p_start.y + principalDirection[1] * 5.0;
+        p_end.z = p_start.z + principalDirection[2] * 5.0;
 
-        // Publish the vertical axis marker
-        vertical_axis_pub.publish(vertical_marker);
+        principal_direction_arrow.points.push_back(p_start);
+        principal_direction_arrow.points.push_back(p_end);
+        principal_direction_pub.publish(principal_direction_arrow);
 
-        // pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(cloud, 0, 255, 0);
-        // std::string cloud_name = "cloud_" + std::to_string(counter);
+    
 
-        // viewer->addPointCloud<pcl::PointXYZ>(cloud, single_color, cloud_name);
-        // ROS_INFO("adding Directional Vector");
-        // pcl::PointXYZ center(pca.getMean().x(), pca.getMean().y(), pca.getMean().z());
-        // std::string arrow_name = "arrow_" + std::to_string(counter);
-        // pcl::PointXYZ principalPoint(center.x + principalDirection.x(), center.y + principalDirection.y(), center.z + principalDirection.z());
-        // viewer->addArrow(principalPoint, center, 1.0, 0.0, 0.0, false, arrow_name);
+        visualization_msgs::Marker angle_text;
+        angle_text.header.frame_id = "map";
+        angle_text.header.stamp = ros::Time::now();
+        angle_text.ns = "angle_text";
+        angle_text.id = counter;
+        angle_text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        angle_text.action = visualization_msgs::Marker::ADD;
+        angle_text.pose.position.x = centroid[0] + principalDirection[0];
+        angle_text.pose.position.y = centroid[1] + principalDirection[1];
+        angle_text.pose.position.z = centroid[2] + principalDirection[2];
+        angle_text.scale.z = 0.4; // Text size
+        angle_text.color.a = 1.0; // Make sure it's not transparent
+        angle_text.color.r = 1.0;
+        angle_text.color.g = 1.0;
+        angle_text.color.b = 0.0; // Yellow text
+        angle_text.text = std::to_string(std::abs(angleDegrees)) + " deg";
+
+        // Publish the angle text marker
+
+        principal_direction_pub.publish(angle_text);
 
         counter++;
     }
+
+    // void pc_callback(const sensor_msgs::PointCloud2ConstPtr &msg)
+    // {
+    //     pcl::fromROSMsg(*msg, *cloud);
+
+    //     pcl::PCA<pcl::PointXYZ> pca;
+    //     pca.setInputCloud(cloud);
+
+    //     Eigen::Vector3f eigenValues = pca.getEigenValues();
+    //     Eigen::Matrix3f eigenVectors = pca.getEigenVectors();
+
+    //     Eigen::Vector3f principalDirection = eigenVectors.col(0);
+
+    //     // Visualization of the point cloud with principal direction vector
+    //     pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(cloud, 0, 255, 0);
+    //     std::string cloud_name = "cloud_" + std::to_string(counter);
+
+    //     viewer->addPointCloud<pcl::PointXYZ>(cloud, single_color, cloud_name);
+    //     ROS_INFO("adding Directional Vector");
+    //     pcl::PointXYZ center(pca.getMean().x(), pca.getMean().y(), pca.getMean().z());
+
+    //     // Increase the size of the arrow for the principal direction vector
+    //     double arrowScale = 3; // Adjust this value to change the size of the arrow
+    //     pcl::PointXYZ principalPoint(center.x + principalDirection.x() * arrowScale, center.y + principalDirection.y() * arrowScale, center.z + principalDirection.z() * arrowScale);
+    //     std::string arrow_name = "arrow_" + std::to_string(counter);
+    //     viewer->addArrow(principalPoint, center, 1.0, 0.0, 0.0, false, arrow_name);
+
+    //     // Adding a coordinate system at the base of the principal direction arrow
+    //     double coordinateSystemScale = 15; // Adjust this value to change the size of the coordinate system
+
+    //     viewer->addCoordinateSystem(coordinateSystemScale, center.x, center.y, center.z, arrow_name + "axis_name");
+
+    //     counter++;
+    // }
 
     void spin()
     {
