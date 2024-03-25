@@ -32,9 +32,14 @@
 #include <condition_variable>
 #include <pcl/common/pca.h>
 #include <visualization_msgs/Marker.h>
-
-#include <pcl/filters/extract_indices.h>
 #include <pcl/common/common.h>
+
+#include <pcl/features/moment_of_inertia_estimation.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/sample_consensus/ransac.h>
+#include <pcl/sample_consensus/sac_model_line.h>
+#include <visualization_msgs/Marker.h>
+#include <Eigen/Geometry>
 
 pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Point Cloud with Normals"));
 pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
@@ -59,7 +64,7 @@ public:
     {
         sub = nh.subscribe("/bsd_sonar/pcl_postproc_sonar", 1, &PcdConverter::pc_callback, this);
         data_sub = nh.subscribe("/bsd_sonar/pcl_preproc_sonar", 1, &PcdConverter::sonar_callback, this);
-        principal_direction_pub = nh.advertise<visualization_msgs::Marker>("principal_direction_marker", 1);
+        bb_pub = nh.advertise<visualization_msgs::Marker>("principal_direction_marker", 1);
         vertical_axis_pub = nh.advertise<visualization_msgs::Marker>("vertical_axis_marker", 1);
 
         viewer_timer = nh.createTimer(ros::Duration(1), &PcdConverter::timerCB, this);
@@ -104,12 +109,56 @@ public:
     }
     void pc_callback(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
-        pcl::fromROSMsg(*msg, *cloud);
-        pcl::PCA<pcl::PointXYZ> pca;
-        pca.setInputCloud(cloud);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr final(new pcl::PointCloud<pcl::PointXYZ>);
 
-        
-        
+        pcl::fromROSMsg(*msg, *cloud);
+
+        pcl::SampleConsensusModelLine<pcl::PointXYZ>::Ptr model_l(new pcl::SampleConsensusModelLine<pcl::PointXYZ>(cloud));
+        pcl::RandomSampleConsensus<pcl::PointXYZ> ransac(model_l);
+        ransac.setDistanceThreshold(.01); // Set the distance threshold
+        ransac.computeModel();
+        pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
+        ransac.getInliers(inliers->indices);
+
+        // Extract inliers
+        pcl::ExtractIndices<pcl::PointXYZ> extract;
+        extract.setInputCloud(cloud);
+        extract.setIndices(inliers);
+        extract.setNegative(false);
+        extract.filter(*final);
+
+        pcl::MomentOfInertiaEstimation<pcl::PointXYZ> feature_extractor;
+        feature_extractor.setInputCloud(final);
+        feature_extractor.compute();
+
+        pcl::PointXYZ min_point_AABB, max_point_AABB;
+        feature_extractor.getAABB(min_point_AABB, max_point_AABB);
+
+        visualization_msgs::Marker marker;
+        marker.header.frame_id = "map"; // Set to your frame ID
+        marker.header.stamp = ros::Time::now();
+        marker.ns = "aabb" ;
+        marker.id = counter;
+        marker.type = visualization_msgs::Marker::CUBE;
+        marker.action = visualization_msgs::Marker::ADD;
+        marker.pose.position.x = (min_point_AABB.x + max_point_AABB.x) / 2.0;
+        marker.pose.position.y = (min_point_AABB.y + max_point_AABB.y) / 2.0;
+        marker.pose.position.z = (min_point_AABB.z + max_point_AABB.z) / 2.0;
+        marker.pose.orientation.x = 0.0;
+        marker.pose.orientation.y = 0.0;
+        marker.pose.orientation.z = 0.0;
+        marker.pose.orientation.w = 1.0;
+        marker.scale.x = max_point_AABB.x - min_point_AABB.x;
+        marker.scale.y = max_point_AABB.y - min_point_AABB.y;
+        marker.scale.z = max_point_AABB.z - min_point_AABB.z;
+        marker.color.a = 0.4; // Don't forget to set the alpha!
+        marker.color.r = 0.0;
+        marker.color.g = 1.0; // Green
+        marker.color.b = 0.0;
+
+        // Publish the marker
+        bb_pub.publish(marker);
+
         counter++;
     }
 
@@ -173,7 +222,7 @@ private:
     ros::Subscriber data_sub;
     ros::ServiceServer save_service;
     ros::Timer viewer_timer;
-    ros::Publisher principal_direction_pub;
+    ros::Publisher bb_pub;
     ros::Publisher vertical_axis_pub;
 
     int counter;
