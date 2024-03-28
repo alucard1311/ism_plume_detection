@@ -33,13 +33,16 @@
 #include <pcl/common/pca.h>
 #include <visualization_msgs/Marker.h>
 #include <pcl/common/common.h>
-
+#include <visualization_msgs/MarkerArray.h>
 #include <pcl/features/moment_of_inertia_estimation.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/sample_consensus/sac_model_line.h>
 #include <visualization_msgs/Marker.h>
 #include <Eigen/Geometry>
+#include <algorithm>
+#include <limits>
+#include <pcl/segmentation/sac_segmentation.h>
 
 pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Point Cloud with Normals"));
 pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
@@ -62,10 +65,11 @@ class PcdConverter
 public:
     PcdConverter() : counter(0), finished(false)
     {
+        nh.setParam("tcpNoDelay", true);
         sub = nh.subscribe("/bsd_sonar/pcl_postproc_sonar", 1, &PcdConverter::pc_callback, this);
         data_sub = nh.subscribe("/bsd_sonar/pcl_preproc_sonar", 1, &PcdConverter::sonar_callback, this);
-        bb_pub = nh.advertise<visualization_msgs::Marker>("principal_direction_marker", 1);
-        vertical_axis_pub = nh.advertise<visualization_msgs::Marker>("vertical_axis_marker", 1);
+        bb_pub = nh.advertise<visualization_msgs::MarkerArray>("bb_ransac", 1000);
+        // vertical_axis_pub = nh.advertise<visualization_msgs::Marker>("vertical_axis_marker", 1);
 
         viewer_timer = nh.createTimer(ros::Duration(1), &PcdConverter::timerCB, this);
     }
@@ -103,61 +107,82 @@ public:
         // std::string cloud_name = "pre_cloud_" + std::to_string(counter);
 
         // viewer->addPointCloud<pcl::PointXYZ>(cloud, single_color, cloud_name);
-        ROS_INFO("adding preproc sonar data");
+        // ROS_INFO("adding preproc sonar data");
 
         counter++;
     }
     void pc_callback(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
-        pcl::PointCloud<pcl::PointXYZ>::Ptr final(new pcl::PointCloud<pcl::PointXYZ>);
-
         pcl::fromROSMsg(*msg, *cloud);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr remainingCloud(new pcl::PointCloud<pcl::PointXYZ>(*cloud));
+        visualization_msgs::MarkerArray marker_array;
+        int lineCount = 0;
 
-        pcl::SampleConsensusModelLine<pcl::PointXYZ>::Ptr model_l(new pcl::SampleConsensusModelLine<pcl::PointXYZ>(cloud));
-        pcl::RandomSampleConsensus<pcl::PointXYZ> ransac(model_l);
-        ransac.setDistanceThreshold(.01); // Set the distance threshold
-        ransac.computeModel();
-        pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
-        ransac.getInliers(inliers->indices);
+        while (remainingCloud->points.size() > 10)
+        {
+            pcl::SACSegmentation<pcl::PointXYZ> seg;
+            seg.setOptimizeCoefficients(true);
+            seg.setModelType(pcl::SACMODEL_LINE);
+            seg.setMethodType(pcl::SAC_RANSAC);
+            //seg.setMaxIterations(100);
+            seg.setDistanceThreshold(0.005); // Set this according to your application
+            pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+            pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
 
-        // Extract inliers
-        pcl::ExtractIndices<pcl::PointXYZ> extract;
-        extract.setInputCloud(cloud);
-        extract.setIndices(inliers);
-        extract.setNegative(false);
-        extract.filter(*final);
+            seg.setInputCloud(remainingCloud);
+            seg.segment(*inliers, *coefficients);
 
-        pcl::MomentOfInertiaEstimation<pcl::PointXYZ> feature_extractor;
-        feature_extractor.setInputCloud(final);
-        feature_extractor.compute();
+            if (inliers->indices.empty())
+            {
+                break;
+            }
 
-        pcl::PointXYZ min_point_AABB, max_point_AABB;
-        feature_extractor.getAABB(min_point_AABB, max_point_AABB);
+            // Extract inliers
+            pcl::ExtractIndices<pcl::PointXYZ> extract;
+            extract.setInputCloud(remainingCloud);
+            extract.setIndices(inliers);
+            extract.setNegative(false);
 
-        visualization_msgs::Marker marker;
-        marker.header.frame_id = "map"; // Set to your frame ID
-        marker.header.stamp = ros::Time::now();
-        marker.ns = "aabb" ;
-        marker.id = counter;
-        marker.type = visualization_msgs::Marker::CUBE;
-        marker.action = visualization_msgs::Marker::ADD;
-        marker.pose.position.x = (min_point_AABB.x + max_point_AABB.x) / 2.0;
-        marker.pose.position.y = (min_point_AABB.y + max_point_AABB.y) / 2.0;
-        marker.pose.position.z = (min_point_AABB.z + max_point_AABB.z) / 2.0;
-        marker.pose.orientation.x = 0.0;
-        marker.pose.orientation.y = 0.0;
-        marker.pose.orientation.z = 0.0;
-        marker.pose.orientation.w = 1.0;
-        marker.scale.x = max_point_AABB.x - min_point_AABB.x;
-        marker.scale.y = max_point_AABB.y - min_point_AABB.y;
-        marker.scale.z = max_point_AABB.z - min_point_AABB.z;
-        marker.color.a = 0.4; // Don't forget to set the alpha!
-        marker.color.r = 0.0;
-        marker.color.g = 1.0; // Green
-        marker.color.b = 0.0;
+            pcl::PointCloud<pcl::PointXYZ>::Ptr inlierCloud(new pcl::PointCloud<pcl::PointXYZ>());
+            extract.filter(*inlierCloud);
 
-        // Publish the marker
-        bb_pub.publish(marker);
+            // Compute bounding box for inliers (simplified to min/max Z)
+            float minZ = std::numeric_limits<float>::max(), maxZ = -std::numeric_limits<float>::max();
+            for (const auto &point : inlierCloud->points)
+            {
+                minZ = std::min(minZ, point.z);
+                maxZ = std::max(maxZ, point.z);
+            }
+
+            // Create a marker for the bounding box
+            visualization_msgs::Marker marker;
+            marker.header.frame_id = "map"; // Set to your point cloud's frame ID
+            marker.header.stamp = ros::Time::now();
+            marker.ns = "ransac_bb";
+            marker.id = counter+(lineCount++);
+            marker.type = visualization_msgs::Marker::CUBE;
+            marker.action = visualization_msgs::Marker::ADD;
+            marker.pose.position.x = coefficients->values[0];
+            marker.pose.position.y = coefficients->values[1];
+            marker.pose.position.z = (minZ + maxZ) / 2.0;
+            marker.scale.x = 0.1;         // Set the width of the line (assuming a small constant value)
+            marker.scale.y = 0.1;         // Set the thickness of the line (assuming a small constant value)
+            marker.scale.z = maxZ - minZ; // Height of the bounding box
+            marker.color.a = 0.3;
+            marker.color.r = 0.0;
+            marker.color.g = 0.0;
+            marker.color.b = 1.0;
+
+            marker_array.markers.push_back(marker);
+            extract.setNegative(true);
+            pcl::PointCloud<pcl::PointXYZ>::Ptr tempCloud(new pcl::PointCloud<pcl::PointXYZ>);
+            extract.filter(*tempCloud);
+            remainingCloud.swap(tempCloud);
+        }
+
+        // Publish the marker array containing all bounding boxes
+        ROS_INFO("Publishing the bouding boxes");
+        bb_pub.publish(marker_array);
 
         counter++;
     }
@@ -223,7 +248,6 @@ private:
     ros::ServiceServer save_service;
     ros::Timer viewer_timer;
     ros::Publisher bb_pub;
-    ros::Publisher vertical_axis_pub;
 
     int counter;
     pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_features_;
